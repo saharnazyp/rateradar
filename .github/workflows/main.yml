@@ -1,0 +1,49 @@
+name: MenuRadar — گزارش ۱۰ روزه
+
+on:
+  schedule:
+    - cron: "30 4 1,11,21 * *"
+  workflow_dispatch:
+
+jobs:
+  build-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright
+        run: |
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+
+      - name: Run scraper
+        run: python scraper.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Commit report to repo
+        run: |
+          git config user.name "MenuRadar Bot"
+          git config user.email "bot@menuradар.ir"
+          git add reports/
+          git diff --staged --quiet || git commit -m "📊 Report $(date +%Y-%m-%d)"
+          git push
+
+      - name: Send to Telegram channel
+        run: python send_telegram.py $(ls reports/MenuRadar_*.xlsx | tail -1)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
