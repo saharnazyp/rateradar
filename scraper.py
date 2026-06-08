@@ -1,221 +1,317 @@
-# -*- coding: utf-8 -*-
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import time
-import re
-import json
+from rapidfuzz import fuzz
+from playwright.sync_api import sync_playwright
+from datetime import datetime
 import os
-from urllib.parse import urlparse
-from datetime import date
 
-# ==========================================================
-# CONFIG
-# ==========================================================
+# -------------------------
+# تنظیمات
+# -------------------------
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-}
+MATCH_THRESHOLD = 70
 
-DATA_DIR = "data"
-REPORT_DIR = "reports"
+OUTPUT_COLUMNS = [
+    "دسته‌بندی",
+    "نام آیتم (من)",
+    "قیمت من (تومان)",
+    "نام آیتم رقیب",
+    "قیمت رقیب (تومان)",
+    "نام رقیب",
+    "اختلاف قیمت (تومان)",
+    "وضعیت",
+]
 
-MY_MENU_FILE = os.path.join(DATA_DIR, "my_menu.xlsx")
-COMPETITORS_FILE = os.path.join(DATA_DIR, "competitors.xlsx")
 
-MATCH_THRESHOLD = 0.25
+# -------------------------
+# ابزار کمکی
+# -------------------------
 
-CONCEPT_MAP = {
-    "کافه": "لیبرو",
-    "کباب ایرانی": "اسپیئو رویال",
-    "تایلندی و ایتالیایی": "روماتای",
-    "پیترا و سوخاری": "چیکن فکتوری",
-    "برگر": "برگر فکتوری",
-    "غذای ایرانی": "اسپیئو اکسپرس",
-    "شیکبار": "لفو",
-}
+def normalize_columns(df):
+    df.columns = df.columns.str.strip().str.replace("\u200c", "")
+    return df
 
-# ==========================================================
-# UTILS
-# ==========================================================
 
-def safe_int(x):
+def normalize_text(t):
+
+    if not isinstance(t, str):
+        return ""
+
+    t = t.strip()
+    t = t.replace("ي", "ی")
+    t = t.replace("ك", "ک")
+
+    return t.lower()
+
+
+def safe_price(v):
+
     try:
-        return int(float(x))
+        return int(float(v))
     except:
-        return 0
+        return None
 
-def parse_price(text):
-    text = re.sub(r"[^\d]", "", str(text))
-    return safe_int(text) if text else None
 
-def normalize(text):
-    text = str(text).lower().strip()
-    text = re.sub(r"[‌\s]+", " ", text)
-    return text
-
-# ==========================================================
-# LOAD DATA
-# ==========================================================
+# -------------------------
+# خواندن منوی خودت
+# -------------------------
 
 def load_my_menu():
-    if not os.path.exists(MY_MENU_FILE):
-        print("❌ my_menu.xlsx not found")
-        return pd.DataFrame()
 
-    df = pd.read_excel(MY_MENU_FILE, sheet_name=0)
+    df = pd.read_excel("my_menu.xlsx")
 
-    required_cols = ["نام فارسي", "کانسپت", "فی واحد  با ارزش افزوده - ریال"]
-    for col in required_cols:
-        if col not in df.columns:
-            print(f"❌ Column missing in my_menu: {col}")
-            return pd.DataFrame()
+    df = normalize_columns(df)
 
-    df = df[df["فی واحد  با ارزش افزوده - ریال"] > 100]
-    df = df.dropna(subset=["نام فارسي", "کانسپت"])
+    df = df.rename(columns={
+        "نام فارسي": "item",
+        "فی واحد  با ارزش افزوده - ریال": "price",
+        "کانسپت": "category"
+    })
+
+    df["price"] = df["price"].apply(safe_price)
+
+    return df[["category", "item", "price"]]
+
+
+# -------------------------
+# خواندن رقبا
+# -------------------------
+
+def load_competitors():
+
+    df = pd.read_excel("competitors.xlsx")
+
+    df = normalize_columns(df)
+
+    df = df.rename(columns={
+        "نام برند": "brand",
+        "منبع": "url"
+    })
 
     return df
 
 
-def load_competitors():
-    if not os.path.exists(COMPETITORS_FILE):
-        print("⚠ competitors.xlsx not found")
-        return {}
+# -------------------------
+# اسکرپ سایت معمولی
+# -------------------------
 
-    xl = pd.read_excel(COMPETITORS_FILE, sheet_name=None)
-    result = {}
+def scrape_normal_site(url):
 
-    for sheet_name, df in xl.items():
-
-        if sheet_name not in CONCEPT_MAP:
-            print(f"⚠ Skipping sheet not in concept map: {sheet_name}")
-            continue
-
-        if df.shape[1] < 2:
-            print(f"⚠ Sheet has less than 2 columns: {sheet_name}")
-            continue
-
-        df = df.iloc[:, :2]
-        df.columns = ["نام_برند", "URL"]
-
-        df = df.dropna(subset=["URL"])
-        df = df[df["URL"].astype(str).str.startswith("http")]
-
-        if df.empty:
-            print(f"⚠ No valid URLs in sheet: {sheet_name}")
-            continue
-
-        result[sheet_name] = df
-
-    return result
-
-# ==========================================================
-# SCRAPER (Generic Only - Stable)
-# ==========================================================
-
-def scrape_generic(url, brand_name):
     items = []
+
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        if r.status_code != 200:
-            return items
+
+        r = requests.get(url, timeout=20)
 
         soup = BeautifulSoup(r.text, "html.parser")
-        price_pattern = re.compile(r"\d{4,}")
 
-        for el in soup.find_all(["div", "li", "article"]):
-            text = el.get_text(" ", strip=True)
-            prices = price_pattern.findall(text)
+        for tag in soup.find_all(["h1","h2","h3","li","span","p","div"]):
 
-            if prices and len(text) < 200:
-                price = safe_int(prices[0])
-                if 10000 < price < 500000000:
-                    name = re.sub(r"\d+", "", text).strip()
-                    if 2 < len(name) < 80:
-                        items.append({
-                            "نام_رقیب": brand_name,
-                            "نام_آیتم_رقیب": name[:80],
-                            "قیمت_رقیب_تومان": price,
-                        })
+            text = tag.get_text(strip=True)
 
-        # dedupe
-        seen = set()
-        unique = []
-        for i in items:
-            if i["نام_آیتم_رقیب"] not in seen:
-                seen.add(i["نام_آیتم_رقیب"])
-                unique.append(i)
+            if 3 < len(text) < 80:
+                items.append(text)
 
-        return unique[:300]
+    except:
+        pass
 
-    except Exception as e:
-        print(f"⚠ Scrape error {brand_name}: {e}")
-        return []
+    return list(set(items))
 
 
-def scrape_all(competitors):
-    scraped = {}
+# -------------------------
+# اسکرپ Snappfood
+# -------------------------
 
-    for sheet_name, df in competitors.items():
-        print(f"\n📍 Scraping concept: {sheet_name}")
-        all_items = []
+def scrape_snappfood(url):
 
-        for _, row in df.iterrows():
-            print(f"  → {row['نام_برند']}")
-            items = scrape_generic(row["URL"], row["نام_برند"])
-            print(f"     ✓ {len(items)} items")
-            all_items.extend(items)
-            time.sleep(2)
+    items = []
 
-        scraped[sheet_name] = all_items
-        print(f"✅ Total for {sheet_name}: {len(all_items)}")
+    with sync_playwright() as p:
 
-    return scraped
+        browser = p.chromium.launch(headless=True)
 
-# ==========================================================
-# MATCHING
-# ==========================================================
+        page = browser.new_page()
 
-def match_score(a, b):
-    a_words = set(normalize(a).split())
-    b_words = set(normalize(b).split())
-    if not a_words or not b_words:
-        return 0
-    return len(a_words & b_words) / len(a_words | b_words)
+        page.goto(url, timeout=60000)
+
+        page.wait_for_timeout(5000)
+
+        for _ in range(8):
+            page.mouse.wheel(0, 5000)
+            page.wait_for_timeout(800)
+
+        texts = page.locator("text=").all_inner_texts()
+
+        for t in texts:
+
+            t = t.strip()
+
+            if 3 < len(t) < 80:
+                items.append(t)
+
+        browser.close()
+
+    return list(set(items))
 
 
-def find_best_match(my_item, comp_items):
-    best = None
-    best_score =0
+# -------------------------
+# انتخاب نوع اسکرپ
+# -------------------------
 
-    for item in comp_items:
-        score = match_score(my_item, item["نام_آیتم_رقیب"])
+def scrape_menu(url):
+
+    if "snappfood" in url.lower():
+        return scrape_snappfood(url)
+
+    return scrape_normal_site(url)
+
+
+# -------------------------
+# fuzzy match
+# -------------------------
+
+def find_match(my_item, competitor_items):
+
+    best_score = 0
+    best_item = None
+
+    my_norm = normalize_text(my_item)
+
+    for item in competitor_items:
+
+        score = fuzz.token_sort_ratio(my_norm, normalize_text(item))
+
         if score > best_score:
             best_score = score
-            best = item
+            best_item = item
 
     if best_score >= MATCH_THRESHOLD:
-        return best
+        return best_item
+
     return None
 
-# ==========================================================
-# BUILD EXCEL
-# ==========================================================
 
-def build_excel(my_menu, competitors, scraped):
-    from openpyxl import Workbook
+# -------------------------
+# ساخت ردیف خروجی
+# -------------------------
 
-    wb = Workbook()
-    ws_summary = wb.active
-    ws_summary.title = "Summary"
+def build_row(category, my_item, my_price, comp_item, comp_price, brand):
 
-    ws_summary.append(["Concept", "My Item", "My Price", "Competitor Item", "Comp Price", "Brand", "Diff"])
+    if comp_item is None:
 
-    any_data = False
+        return {
+            "دسته‌بندی": category,
+            "نام آیتم (من)": my_item,
+            "قیمت من (تومان)": my_price,
+            "نام آیتم رقیب": "—",
+            "قیمت رقیب (تومان)": "—",
+            "نام رقیب": "—",
+            "اختلاف قیمت (تومان)": "—",
+            "وضعیت": "⚪ بدون تطابق",
+        }
 
-    for concept_sheet, my_concept in CONCEPT_MAP.items():
+    diff = "—"
 
-        if concept_sheet not in competitors:
-            continue
+    if comp_price and my_price:
+        diff = comp_price - my_price
 
-        my_items = my_menu[my_menu["کانسپت"] == my_con
+    if diff == "—":
+        status = "⚪ بدون تطابق"
+    elif diff > 0:
+        status = "🔴 گران‌تر"
+    elif diff < 0:
+        status = "🟢 ارزان‌تر"
+    else:
+        status = "⚪ برابر"
+
+    return {
+        "دسته‌بندی": category,
+        "نام آیتم (من)": my_item,
+        "قیمت من (تومان)": my_price,
+        "نام آیتم رقیب": comp_item,
+        "قیمت رقیب (تومان)": comp_price if comp_price else "—",
+        "نام رقیب": brand,
+        "اختلاف قیمت (تومان)": diff,
+        "وضعیت": status,
+    }
+
+
+# -------------------------
+# موتور اصلی
+# -------------------------
+
+def run():
+
+    print("Loading menus...")
+
+    my_menu = load_my_menu()
+
+    competitors = load_competitors()
+
+    competitor_data = {}
+
+    for _, row in competitors.iterrows():
+
+        brand = row["brand"]
+        url = row["url"]
+
+        print("Scraping:", brand)
+
+        competitor_data[brand] = scrape_menu(url)
+
+        print("Items found:", len(competitor_data[brand]))
+
+    results = []
+
+    for _, row in my_menu.iterrows():
+
+        category = row["category"]
+        my_item = row["item"]
+        my_price = row["price"]
+
+        matched = False
+
+        for brand, items in competitor_data.items():
+
+            match = find_match(my_item, items)
+
+            if match:
+
+                results.append(
+                    build_row(category, my_item, my_price, match, None, brand)
+                )
+
+                matched = True
+                break
+
+        if not matched:
+
+            results.append(
+                build_row(category, my_item, my_price, None, None, None)
+            )
+
+    df = pd.DataFrame(results, columns=OUTPUT_COLUMNS)
+
+    if not os.path.exists("outputs"):
+        os.makedirs("outputs")
+
+    filename = f"outputs/MenuRadar_{datetime.today().date()}.xlsx"
+
+    with pd.ExcelWriter(filename, engine="openpyxl") as writer:
+
+        df.to_excel(writer, sheet_name="Report", startrow=1, index=False)
+
+        ws = writer.sheets["Report"]
+
+        ws["A1"] = "📊 مقایسه منو — MenuRadar"
+
+    print("Report saved:", filename)
+
+
+# -------------------------
+# اجرا
+# -------------------------
+
+if __name__ == "__main__":
+    run()
