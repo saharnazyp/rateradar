@@ -22,11 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Playwright
-        run: |
-          python -m playwright install chromium --with-deps
+        run: pip install requests beautifulsoup4 lxml pandas openpyxl
 
       - name: Run scraper
         run: python scraper.py
