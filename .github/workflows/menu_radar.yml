@@ -9,12 +9,12 @@ jobs:
   build-report:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,15 +35,20 @@ jobs:
           PYTHONIOENCODING: utf-8
 
       - name: Commit report to repo
-        run: |
-          git config user.name "MenuRadar Bot"
-          git config user.email "bot@menuradар.ir"
-          git add reports/
-          git diff --staged --quiet || git commit -m "📊 Report $(date +%Y-%m-%d)"
-          git push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "📊 Report"
+          file_pattern: reports/
 
       - name: Send to Telegram channel
         run: python send_telegram.py $(ls reports/MenuRadar_*.xlsx | tail -1)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MenuRadar-${{ github.run_number }}
+          path: reports/MenuRadar_*.xlsx
+          retention-days: 30
