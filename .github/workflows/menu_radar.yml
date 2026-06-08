@@ -26,8 +26,7 @@ jobs:
 
       - name: Install Playwright
         run: |
-          python -m playwright install chromium
-          python -m playwright install-deps chromium
+          python -m playwright install chromium --with-deps
 
       - name: Run scraper
         run: python scraper.py
