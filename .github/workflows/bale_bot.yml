@@ -1,0 +1,34 @@
+name: Bale Bot — همیشه روشن
+
+on:
+  schedule:
+    - cron: "0 */5 * * *"   # هر ۵ ساعت خودکار restart
+  workflow_dispatch:
+
+jobs:
+  bale-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 290
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull latest reports
+        run: |
+          git pull origin main || true
+          mkdir -p reports
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Bale bot
+        run: python bale_bot.py
+        env:
+          BALE_BOT_TOKEN: ${{ secrets.BALE_BOT_TOKEN }}
+          BOT_PASSWORD: ${{ secrets.BOT_PASSWORD }}
