@@ -1,0 +1,82 @@
+name: MenuRadar — Weekly Scrape & Send
+
+on:
+  schedule:
+    # یکشنبه ۹:۰۰ صبح تهران (UTC+3:30) = ۵:۳۰ UTC
+    - cron: "30 5 * * 0"
+  workflow_dispatch:   # دستی هم بشه ران کرد
+
+jobs:
+  scrape-and-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Run scraper on VPS
+        run: |
+          ssh -i ~/.ssh/vps_key \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=60 \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+              "cd ~/menu_reader && source venv/bin/activate && python -u menu_reader.py 2>&1"
+
+      - name: Download reports from VPS
+        run: |
+          mkdir -p reports
+          scp -i ~/.ssh/vps_key \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/menu_reader/reports/RawMenus_*.xlsx \
+              reports/ || echo "no xlsx files"
+          scp -i ~/.ssh/vps_key \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:~/menu_reader/reports/menus_*.csv \
+              reports/ || echo "no csv files"
+          ls -la reports/
+
+      - name: Find latest report
+        id: find_report
+        run: |
+          LATEST_XLSX=$(ls -t reports/RawMenus_*.xlsx 2>/dev/null | head -1)
+          LATEST_CSV=$(ls -t reports/menus_*.csv 2>/dev/null | head -1)
+          echo "xlsx=$LATEST_XLSX" >> $GITHUB_OUTPUT
+          echo "csv=$LATEST_CSV" >> $GITHUB_OUTPUT
+          echo "تازه‌ترین گزارش: $LATEST_XLSX"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Send to Telegram channel
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: |
+          if [ -f "${{ steps.find_report.outputs.xlsx }}" ]; then
+            python send_telegram.py "${{ steps.find_report.outputs.xlsx }}"
+          else
+            echo "⚠️ فایل اکسل پیدا نشد"
+            exit 1
+          fi
+
+      - name: Commit reports to repo
+        run: |
+          git config user.name "menuradar-bot"
+          git config user.email "menuradar@spo.local"
+          git add reports/
+          git diff --staged --quiet || git commit -m "📊 گزارش هفتگی $(date +'%Y-%m-%d')"
+          git push || echo "nothing to push"
