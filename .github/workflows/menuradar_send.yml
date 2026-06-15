@@ -1,0 +1,42 @@
+name: MenuRadar — Send Report
+
+on:
+  workflow_dispatch:   # وقتی VPS ترگر می‌کنه
+  push:                # یا وقتی فایل جدید پوش می‌شه
+    paths:
+      - 'reports/RawMenus_*.xlsx'
+
+jobs:
+  send-to-telegram:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find latest report
+        id: find_report
+        run: |
+          LATEST_XLSX=$(ls -t reports/RawMenus_*.xlsx 2>/dev/null | head -1)
+          if [ -z "$LATEST_XLSX" ]; then
+            echo "❌ فایل اکسلی پیدا نشد"
+            exit 1
+          fi
+          echo "xlsx=$LATEST_XLSX" >> $GITHUB_OUTPUT
+          echo "📄 تازه‌ترین: $LATEST_XLSX"
+          ls -la reports/
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: python send_telegram.py "${{ steps.find_report.outputs.xlsx }}"
