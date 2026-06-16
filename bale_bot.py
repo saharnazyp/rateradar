@@ -1,6 +1,7 @@
 """
 ربات بله — MenuRadar
 سیستم ورود با پسورد (بدون نیاز به User ID)
+v2 — آپدیت برای الگوی RawMenus_*.xlsx
 """
 
 import os
@@ -12,13 +13,10 @@ import requests
 BALE_TOKEN = os.environ["BALE_BOT_TOKEN"]
 BASE_URL = f"https://tapi.bale.ai/bot{BALE_TOKEN}"
 
-# پسورد ورود — از Secret گیت‌هاب خونده میشه
 BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "SPO1403")
 
 REPORT_DIR = "reports"
 
-# ذخیره کاربران احراز هویت شده در حافظه (تا ربات ریستارت بشه)
-# key: chat_id, value: True
 authenticated_users = {}
 
 # ─────────────────────────────────────────────
@@ -73,9 +71,17 @@ MAIN_KEYBOARD = {
 # ─────────────────────────────────────────────
 
 def get_latest_report():
+    """جدیدترین گزارش RawMenus رو پیدا می‌کنه — اول بر اساس mtime، نه اسم"""
     os.makedirs(REPORT_DIR, exist_ok=True)
-    files = sorted(glob.glob(f"{REPORT_DIR}/MenuRadar_*.xlsx"))
-    return files[-1] if files else None
+    # الگوی جدید: RawMenus_*.xlsx
+    files = glob.glob(f"{REPORT_DIR}/RawMenus_*.xlsx")
+    # اگه چیزی نبود، الگوی قدیمی رو هم چک کن (سازگاری عقب)
+    if not files:
+        files = glob.glob(f"{REPORT_DIR}/MenuRadar_*.xlsx")
+    if not files:
+        return None
+    # جدیدترین بر اساس زمان فایل (mtime) — نه اسم
+    return max(files, key=os.path.getmtime)
 
 def is_authenticated(chat_id):
     return authenticated_users.get(chat_id, False)
@@ -105,9 +111,16 @@ def handle_password(chat_id, first_name, text):
             reply_markup=MAIN_KEYBOARD
         )
     else:
-        send_message(chat_id,
-            "❌ رمز اشتباهه. دوباره امتحان کن:"
-        )
+        send_message(chat_id, "❌ رمز اشتباهه. دوباره امتحان کن:")
+
+def _extract_date(filename):
+    """تاریخ رو از اسم فایل می‌گیره"""
+    name = os.path.basename(filename)
+    # RawMenus_2026-06-15.xlsx یا MenuRadar_2026-06-15.xlsx
+    parts = name.replace(".xlsx", "").split("_")
+    if len(parts) >= 2:
+        return parts[-1]
+    return "نامعلوم"
 
 def handle_report(chat_id):
     report = get_latest_report()
@@ -117,16 +130,13 @@ def handle_report(chat_id):
             "گزارش بعدی توسط سیستم خودکار ارسال می‌شه."
         )
         return
-    try:
-        date_part = os.path.basename(report).replace("MenuRadar_", "").replace(".xlsx", "")
-        caption = (
-            f"📊 *گزارش MenuRadar*\n"
-            f"📅 تاریخ: `{date_part}`\n\n"
-            f"مقایسه قیمت منو SPO با رقبا\n"
-            f"هر کانسپت در یک شیت جداگانه"
-        )
-    except Exception:
-        caption = "📊 گزارش MenuRadar"
+    date_part = _extract_date(report)
+    caption = (
+        f"📊 *گزارش MenuRadar*\n"
+        f"📅 تاریخ: `{date_part}`\n\n"
+        f"مقایسه قیمت منو SPO با رقبا\n"
+        f"هر کانسپت در یک شیت جداگانه"
+    )
     send_message(chat_id, "⏳ در حال ارسال فایل...")
     send_document(chat_id, report, caption)
 
@@ -136,14 +146,14 @@ def handle_last_update(chat_id):
         send_message(chat_id, "⚠️ هنوز هیچ گزارشی آماده نیست.")
         return
     try:
-        date_part = os.path.basename(report).replace("MenuRadar_", "").replace(".xlsx", "")
+        date_part = _extract_date(report)
         mtime = os.path.getmtime(report)
         dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y/%m/%d — %H:%M")
         send_message(chat_id,
             f"📅 *آخرین آپدیت*\n\n"
             f"تاریخ گزارش: `{date_part}`\n"
             f"زمان فایل: `{dt}`\n\n"
-            f"_گزارش بعدی ۱۰ روز دیگه به‌روز می‌شه_ ⏱"
+            f"_گزارش هر هفته یکشنبه به‌روز می‌شه_ ⏱"
         )
     except Exception as e:
         send_message(chat_id, f"خطا: {e}")
@@ -153,7 +163,7 @@ def handle_help(chat_id):
         "📌 *راهنمای ربات MenuRadar*\n\n"
         "📊 *گزارش رقبا* — آخرین فایل Excel مقایسه قیمت\n"
         "📅 *آخرین آپدیت* — تاریخ به‌روزرسانی داده‌ها\n\n"
-        "⏱ گزارش‌ها هر ۱۰ روز خودکار آپدیت می‌شن\n"
+        "⏱ گزارش‌ها هر هفته یکشنبه خودکار آپدیت می‌شن\n"
         "📢 گزارش جدید در کانال تلگرام هم ارسال می‌شه"
     )
 
@@ -165,41 +175,33 @@ def handle_not_authenticated(chat_id):
 # ─────────────────────────────────────────────
 
 def process_update(update):
-    # دکمه‌های inline
     if "callback_query" in update:
         cq = update["callback_query"]
         chat_id = cq["message"]["chat"]["id"]
         data = cq.get("data", "")
         answer_callback(cq["id"])
-
         if not is_authenticated(chat_id):
             handle_not_authenticated(chat_id)
             return
-
         if data == "report":
             handle_report(chat_id)
         elif data == "last_update":
             handle_last_update(chat_id)
         elif data == "help":
             handle_help(chat_id)
-
-    # پیام متنی
     elif "message" in update:
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         first_name = msg["from"].get("first_name", "کاربر")
         text = msg.get("text", "").strip()
-
         if text in ["/start", "start"]:
             handle_start(chat_id, first_name)
         elif is_authenticated(chat_id):
-            # کاربر وارد شده — هر پیامی منو رو نشون بده
             send_message(chat_id,
                 "از دکمه‌های زیر استفاده کن 👇",
                 reply_markup=MAIN_KEYBOARD
             )
         else:
-            # کاربر وارد نشده — پسورد چک کن
             handle_password(chat_id, first_name, text)
 
 # ─────────────────────────────────────────────
@@ -207,7 +209,7 @@ def process_update(update):
 # ─────────────────────────────────────────────
 
 def run_polling():
-    print("🤖 Bale bot started (password mode)...")
+    print("🤖 Bale bot started (v2 — RawMenus pattern)...")
     offset = 0
     while True:
         try:
