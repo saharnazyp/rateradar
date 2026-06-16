@@ -13,7 +13,7 @@ import requests
 BALE_TOKEN = os.environ["BALE_BOT_TOKEN"]
 BASE_URL = f"https://tapi.bale.ai/bot{BALE_TOKEN}"
 
-BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "SPO1403")
+BOT_PASSWORD = os.environ.get("BOT_PASSWORD", "spo1245")
 
 REPORT_DIR = "reports"
 
