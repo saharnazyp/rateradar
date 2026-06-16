@@ -12,7 +12,7 @@ def send_to_telegram(file_path: str):
     caption = (
         f"📊 *گزارش MenuRadar*\n"
         f"📅 تاریخ: {date_str}\n\n"
-        f"مقایسه قیمت منو رستوران‌های SPO با رقبا\n"
+        f" قیمت منو رستوران‌های SPO با رقبا\n"
         f"هر کانسپت در یک شیت جداگانه"
     )
 
