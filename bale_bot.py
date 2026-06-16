@@ -134,7 +134,7 @@ def handle_report(chat_id):
     caption = (
         f"📊 *گزارش MenuRadar*\n"
         f"📅 تاریخ: `{date_part}`\n\n"
-        f"مقایسه قیمت منو SPO با رقبا\n"
+        f" قیمت منو SPO با رقبا\n"
         f"هر کانسپت در یک شیت جداگانه"
     )
     send_message(chat_id, "⏳ در حال ارسال فایل...")
