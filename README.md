@@ -116,11 +116,6 @@ rateradar/
     └── bale_bot.yml         # always-on bot runner
 ```
 
-## Access
-
-- **Telegram channel**: [@SPOMenuRadar](https://t.me/SPOMenuRadar) — weekly auto-published reports
-- **Bale bot**: [@SpoMenuRadarbot](https://ble.ir/SpoMenuRadarbot) — on-demand access for SPO team
-
 ## Status
 
 Currently in production for SPO Restaurant Group. Reports are delivered weekly without manual intervention.
