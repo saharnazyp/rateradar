@@ -118,10 +118,6 @@ rateradar/
     └── bale_bot.yml         # اجرای دائمی ربات
 ```
 
-## دسترسی
-
-- **کانال تلگرام**: [@SPOMenuRadar](https://t.me/SPOMenuRadar) — گزارش‌های هفتگی به‌صورت خودکار
-- **ربات بله**: [@SpoMenuRadarbot](https://ble.ir/SpoMenuRadarbot) — دسترسی درخواستی برای تیم SPO
 
 ## وضعیت
 
