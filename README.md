@@ -4,7 +4,7 @@
 
 **Automated competitor menu price intelligence for SPO Restaurant Group**
 
-🇬🇧 **English** &nbsp; | &nbsp; [🇮🇷 فارسی](./README.fa.md)
+🇬🇧 **English** &nbsp; | &nbsp; [persian فارسی](./README.fa.md)
 
 </div>
 
