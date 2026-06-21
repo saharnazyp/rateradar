@@ -1,4 +1,4 @@
-name: MenuRadar — Send Reports to Telegram
+name: MenuRadar — Send Reports + Restart Bale Bot
 
 on:
   push:
@@ -27,3 +27,31 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
         run: python send_telegram.py
+
+      - name: Cancel running Bale bot workflow
+        env:
+          GH_TOKEN: ${{ secrets.CH_PAT }}
+        run: |
+          # پیدا کردن run های در حال اجرای bale_bot.yml
+          RUNS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bale_bot.yml/runs?status=in_progress" \
+            | grep -oP '"id":\s*\K[0-9]+' | head -5)
+          
+          for RUN_ID in $RUNS; do
+            echo "Cancelling run $RUN_ID..."
+            curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/cancel"
+          done
+          
+          # یه ۵ ثانیه صبر کن
+          sleep 5
+
+      - name: Restart Bale bot workflow
+        env:
+          GH_TOKEN: ${{ secrets.CH_PAT }}
+        run: |
+          curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bale_bot.yml/dispatches" \
+            -d '{"ref":"main"}'
+          echo "✓ Bale bot restarted"
