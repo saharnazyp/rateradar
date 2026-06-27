@@ -118,7 +118,7 @@ rateradar/
 
 ## Status
 
-Currently in production for SPO Restaurant Group. Reports are delivered weekly without manual intervention.
+Currently in production for SPO Group. Reports are delivered weekly without manual intervention.
 
 ---
 
