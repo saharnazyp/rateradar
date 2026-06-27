@@ -124,6 +124,6 @@ Currently in production for SPO Restaurant Group. Reports are delivered weekly w
 
 <div align="center">
 
-Built with care for SPO Restaurant Group · Tehran
+Built with care for SPO Group · Tehran
 
 </div>
